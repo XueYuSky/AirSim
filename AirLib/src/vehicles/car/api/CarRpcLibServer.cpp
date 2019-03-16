@@ -12,17 +12,26 @@
 
 #include "common/Common.hpp"
 STRICT_MODE_OFF
+
 #ifndef RPCLIB_MSGPACK
 #define RPCLIB_MSGPACK clmdep_msgpack
 #endif // !RPCLIB_MSGPACK
 #include "common/common_utils/MinWinDefines.hpp"
 #undef NOUSER
-//TODO: HACK: UE4 defines macro with stupid names like "check" that conflicts with msgpack library
-//#undef check
+
+#include "common/common_utils/WindowsApisCommonPre.hpp"
+#undef FLOAT
+#undef check
 #include "rpc/server.h"
-#include "vehicles/car/api/CarRpcLibAdapators.hpp"
 //TODO: HACK: UE4 defines macro with stupid names like "check" that conflicts with msgpack library
+#ifndef check
 #define check(expr) (static_cast<void>((expr)))
+#endif
+#include "common/common_utils/WindowsApisCommonPost.hpp"
+
+#include "vehicles/car/api/CarRpcLibAdapators.hpp"
+
+
 STRICT_MODE_ON
 
 
@@ -30,17 +39,17 @@ namespace msr { namespace airlib {
 
 typedef msr::airlib_rpclib::CarRpcLibAdapators CarRpcLibAdapators;
 
-CarRpcLibServer::CarRpcLibServer(CarApiBase* vehicle, string server_address, uint16_t port)
-    : RpcLibServerBase(vehicle, server_address, port)
+CarRpcLibServer::CarRpcLibServer(ApiProvider* api_provider, string server_address, uint16_t port)
+    : RpcLibServerBase(api_provider, server_address, port)
 {
     (static_cast<rpc::server*>(getServer()))->
-        bind("getCarState", [&]() -> CarRpcLibAdapators::CarState {
-        return CarRpcLibAdapators::CarState(getCarApi()->getCarState());
+        bind("getCarState", [&](const std::string& vehicle_name) -> CarRpcLibAdapators::CarState {
+        return CarRpcLibAdapators::CarState(getVehicleApi(vehicle_name)->getCarState());
     });
 
     (static_cast<rpc::server*>(getServer()))->
-        bind("setCarControls", [&](const CarRpcLibAdapators::CarControls& controls) -> void {
-        getCarApi()->setCarControls(controls.to());
+        bind("setCarControls", [&](const CarRpcLibAdapators::CarControls& controls, const std::string& vehicle_name) -> void {
+        getVehicleApi(vehicle_name)->setCarControls(controls.to());
     });
 
 }
@@ -49,12 +58,6 @@ CarRpcLibServer::CarRpcLibServer(CarApiBase* vehicle, string server_address, uin
 CarRpcLibServer::~CarRpcLibServer()
 {
 }
-
-CarApiBase* CarRpcLibServer::getCarApi()
-{
-    return static_cast<CarApiBase*>(RpcLibServerBase::getVehicleApi());
-}
-
 
 }} //namespace
 

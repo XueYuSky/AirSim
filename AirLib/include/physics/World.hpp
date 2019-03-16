@@ -16,11 +16,11 @@ namespace msr { namespace airlib {
 
 class World : public UpdatableContainer<UpdatableObject*> {
 public:
-    World(PhysicsEngineBase* physics_engine)
+    World(std::unique_ptr<PhysicsEngineBase> physics_engine)
+        : physics_engine_(std::move(physics_engine))
     { 
         World::clear();
 
-        physics_engine_ = physics_engine;
         if (physics_engine)
             physics_engine_->clear();
     }
@@ -108,6 +108,21 @@ public:
         executor_.stop();
     }
 
+    void pause(bool is_paused)
+    {
+        executor_.pause(is_paused);
+    }
+
+    bool isPaused() const
+    {
+        return executor_.isPaused();
+    }
+
+    void continueForTime(double seconds)
+    {
+        executor_.continueForTime(seconds);
+    }
+
 private:
     bool worldUpdatorAsync(uint64_t dt_nanos)
     {
@@ -129,7 +144,7 @@ private:
     }
 
 private:
-    PhysicsEngineBase* physics_engine_ = nullptr;
+    std::unique_ptr<PhysicsEngineBase> physics_engine_ = nullptr;
     common_utils::ScheduledExecutor executor_;
 };
 

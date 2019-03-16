@@ -1,4 +1,8 @@
+// Copyright (c) Microsoft Corporation. All rights reserved.
+// Licensed under the MIT License.
+
 #include "DirectInputJoystick.h"
+#include "UnrealMathUtility.h"
 
 #if defined _WIN32 || defined _WIN64
 
@@ -6,15 +10,19 @@
 #define DIRECTINPUT_VERSION 0x0800
 #endif
 
+#ifndef _CRT_SECURE_NO_WARNINGS
+#define _CRT_SECURE_NO_WARNINGS 1
+#endif
+
+#include "common/common_utils/WindowsApisCommonPre.hpp"
+
 #include "common/common_utils/MinWinDefines.hpp"
 #include <windows.h>
-#pragma warning(push)
-#pragma warning(disable:6000 28251)
+
 #include <dinput.h>
-#pragma warning(pop)
 
 #include <dinputd.h>
-#include "UnrealMathUtility.h
+#include <ole2.h> //SysAllocString
 
 // Stuff to filter out XInput devices
 #ifndef FALSE
@@ -26,6 +34,9 @@
 #endif
 #include <wbemidl.h>
 
+#include "common/common_utils/WindowsApisCommonPost.hpp"
+
+
 
 //-----------------------------------------------------------------------------
 // Defines, constants, and global variables
@@ -33,7 +44,7 @@
 #define DIJT_SAFE_DELETE(p)  { if(p) { delete (p);     (p)=nullptr; } }
 #define DIJT_SAFE_RELEASE(p) { if(p) { (p)->Release(); (p)=nullptr; } }
 
-struct DirectInputJoyStick::impl{
+struct DirectInputJoyStick::impl {
 private:
     struct XINPUT_DEVICE_NODE
     {
@@ -67,35 +78,42 @@ public:
     JoystickState state;
     JoystickInfo joystick_info;
 
-    bool initialize(unsigned int joystick_index)
+    bool initialize(int joystick_index)
     {
+        if (joystick_index < 0)
+            return false;
         return InitDirectInput(joystick_index) == S_OK;
     }
 
     // Magnitude ranges from -1 to 1
-    void setAutoCenterStrength(double magnitude) 
+    void setAutoCenterStrength(double magnitude)
     {
         DICONSTANTFORCE cf = { magnitude * 10000 };
-        
+
         g_sAutoCenterConfig.cbTypeSpecificParams = sizeof(DICONSTANTFORCE);
         g_sAutoCenterConfig.lpvTypeSpecificParams = &cf;
 
-        g_pAutoCenterHandle->SetParameters(&g_sAutoCenterConfig, DIEP_DIRECTION | 
-            DIEP_TYPESPECIFICPARAMS | DIEP_START);
+        if (g_pAutoCenterHandle) {
+            g_pAutoCenterHandle->SetParameters(&g_sAutoCenterConfig, DIEP_DIRECTION |
+                DIEP_TYPESPECIFICPARAMS | DIEP_START);
+        }
+
     }
 
 #define FFWRMAX 0.08
 
     // Strength ranges from 0 to 1
-    void setWheelRumbleStrength(double strength) 
+    void setWheelRumbleStrength(double strength)
     {
         DIPERIODIC pf = { FFWRMAX * strength * 10000,0,0,0.06 * 1000000 };
-        
-        g_sWheelRumbleConfig.cbTypeSpecificParams = sizeof(DIPERIODIC);         
+
+        g_sWheelRumbleConfig.cbTypeSpecificParams = sizeof(DIPERIODIC);
         g_sWheelRumbleConfig.lpvTypeSpecificParams = &pf;
 
-        g_pWheelRumbleHandle->SetParameters(&g_sWheelRumbleConfig, DIEP_DIRECTION |
-            DIEP_TYPESPECIFICPARAMS | DIEP_START);
+        if (g_pWheelRumbleHandle) {
+            g_pWheelRumbleHandle->SetParameters(&g_sWheelRumbleConfig, DIEP_DIRECTION |
+                DIEP_TYPESPECIFICPARAMS | DIEP_START);
+        }
     }
 
     const JoystickState& getState(bool update_state = true)
@@ -122,7 +140,7 @@ public:
     }
 
 private:
-    std::string toString(const std::wstring& wstr) 
+    std::string toString(const std::wstring& wstr)
     {
         return std::string(wstr.begin(), wstr.end());
     }
@@ -138,7 +156,7 @@ private:
         return g;
     }
 
-    HRESULT InitForceFeedback() 
+    HRESULT InitForceFeedback()
     {
 
         HRESULT hr;
@@ -472,7 +490,7 @@ private:
     {
         DirectInputJoyStick::impl *obj = reinterpret_cast<DirectInputJoyStick::impl *>(pContext);
 
-        auto pEnumContext = & obj->enumContext;
+        auto pEnumContext = &obj->enumContext;
         HRESULT hr;
 
         if (obj->g_bFilterOutXinputDevices && obj->IsXInputDevice(&pdidInstance->guidProduct))
@@ -604,7 +622,7 @@ private:
         DIJOYSTATE2 js;           // DInput joystick state 
 
         state.is_valid = false;
-        
+
         if (!g_pJoystick) {
             state.message = "No device at index";
             return S_OK;
@@ -615,7 +633,7 @@ private:
         if (FAILED(hr))
         {
             state.message = "device stream interrupted";
-            
+
             // DInput is telling us that the input stream has been
             // interrupted. We aren't tracking any state between polls, so
             // we don't have any special reset that needs to be done. We
@@ -689,7 +707,7 @@ DirectInputJoyStick::~DirectInputJoyStick()
     //nop
 }
 
-bool DirectInputJoyStick::initialize(unsigned int joystick_index)
+bool DirectInputJoyStick::initialize(int joystick_index)
 {
     return pimpl_->initialize(joystick_index);
 }

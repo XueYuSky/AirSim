@@ -6,19 +6,23 @@
 
 #include "common/Common.hpp"
 #include <functional>
-#include "vehicles/multirotor/api/MultirotorApi.hpp"
 #include "api/RpcLibServerBase.hpp"
+#include "vehicles/multirotor/api/MultirotorApiBase.hpp"
 
 
 namespace msr { namespace airlib {
 
 class MultirotorRpcLibServer : public RpcLibServerBase {
 public:
-    MultirotorRpcLibServer(MultirotorApi* drone, string server_address, uint16_t port = 41451);
+    MultirotorRpcLibServer(ApiProvider* api_provider, string server_address, uint16_t port = 41451);
     virtual ~MultirotorRpcLibServer();
 
-private:
-    MultirotorApi* getDroneApi();
+protected:
+    virtual MultirotorApiBase* getVehicleApi(const std::string& vehicle_name) override
+    {
+        return static_cast<MultirotorApiBase*>(RpcLibServerBase::getVehicleApi(vehicle_name));
+    }
+
 };
 
 }} //namespace

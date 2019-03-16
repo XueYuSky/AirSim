@@ -7,13 +7,11 @@ The current recommended and tested environment is **Ubuntu 16.04 LTS**. Theoreti
 It's super simple: 1-2-3!
 
 1. Make sure you are [registered with Epic Games](https://docs.unrealengine.com/latest/INT/Platforms/Linux/BeginnerLinuxDeveloper/SettingUpAnUnrealWorkflow/1/index.html). This is required to get source code access for Unreal Engine.
-2. Clone Unreal in your favorite folder and build it (this may take a while!). **Note**: We only support Unreal 4.17 at present.
+2. Clone Unreal in your favorite folder and build it (this may take a while!). **Note**: We only support Unreal 4.18 at present.
    ```bash
    # go to the folder where you clone GitHub projects
-   git clone -b 4.17 https://github.com/EpicGames/UnrealEngine.git
+   git clone -b 4.18 https://github.com/EpicGames/UnrealEngine.git
    cd UnrealEngine
-   # the Unreal build was broken a few times so we will get the commit that works
-   git checkout af96417313a908b20621a443175ba91683c238c8
    ./Setup.sh
    ./GenerateProjectFiles.sh
    make
@@ -27,29 +25,40 @@ It's super simple: 1-2-3!
    ./build.sh
    ```
 
-## Setup Remote Control
+
+## Build Unreal Environment
+
+Finally, you will need an Unreal project that hosts the environment for your vehicles. AirSim comes with a built-in "Blocks Environment" which you can use, or you can create your own. Please see [setting up Unreal Environment](unreal_proj.md).
+
+## Setup Remote Control (Multirotor Only)
 
 A remote control is required if you want to fly manually. See the [remote control setup](remote_control.md) for more details.
 
 Alternatively, you can use [APIs](apis.md) for programmatic control or use the so-called [Computer Vision mode](image_apis.md) to move around using the keyboard.
 
-## Setup Unreal Environment
+## How to Use AirSim
 
-Finally, you will need an Unreal project that hosts the environment for your vehicles. AirSim comes with a built-in "Blocks Environment" which you can use, or you can create your own. Please see [setting up Unreal Environment](unreal_proj.md).
+Once AirSim is set up by following above steps, you can,
+
+1. Go to `UnrealEngine` folder and start Unreal by running `UnrealEngine/Engine/Binaries/Linux/UE4Editor`.
+2. When Unreal Engine prompts for opening or creating project, select Browse and choose `AirSim/Unreal/Environments/Blocks` (or your [custom](unreal_custenv.md) Unreal project).
+3. If you get prompts to convert project, look for More Options or Convert-In-Place option. If you get prompted to build, chose Yes. If you get prompted to disable AirSim plugin, choose No.
+4. After Unreal Editor loads, press Play button. Tip: go to 'Edit->Editor Preferences', in the 'Search' box type 'CPU' and ensure that the 'Use Less CPU when in Background' is unchecked.
+
+See [Using APIs](apis.md) and [settings.json](settings.md) for various options available.
 
 ## FAQ
 
-#### What are the known issues with Unreal 4.16?
+#### I'm getting error "<MyProject> could not be compiled. Try rebuilding from source manually".
 
-* One of the major issues is [this bug in Unreal](https://answers.unrealengine.com/questions/664905/unreal-crashes-on-two-lines-of-extremely-simple-st.html). We have a workaround for some parts of the code but we haven't tested if everything is covered.
-* Clicking the "End" button causes Unreal to crash.
-* The report function (when you press <kbd>R</kbd>) also causes a crash because of the above reasons.
+This could either happen because of compile error or the fact that your gch files are outdated. Look in to your console window. Do you see something like below?
+```
+fatal errorfatal error: : file  '/usr/include/linux/version.h''/usr/include/linux/version.h'  has  been  modified  since  the  precompiled  header
+```
 
-#### What are the known issues with Unreal 4.17?
+If this is the case then look for *.gch file(s) that follows after that message, delete them and try again. Here's [relevant thread](https://answers.unrealengine.com/questions/412349/linux-ue4-build-precompiled-header-fatal-error.html) on Unreal Engine forums.
 
-* We have seen some random crashes during the startup.
-* You might get a warning that says that the AirSim plugin is incompatible, which you can ignore.
-* Clicking the "End" button freezes the Unreal Editor. When this happens you will need to manually kill the process.
+If you see other compile errors in console then open up those source files and see if it is due to changes you made. If not, then report it as issue on GitHub.
 
 #### Unreal crashed! How do I know what went wrong?
 
@@ -65,15 +74,11 @@ Yes, you can, but we haven't tested it. You can find the instructions [here](htt
 
 #### What compiler and stdlib does AirSim use?
 
-We use the same compiler, **Clang 3.9**, and stdlib, **libc++**, that Unreal uses. AirSim's `setup.sh` will automatically download them both. The libc++ source code is cloned into the `llvm-source` folder and is built into the `llvm-build` folder, from where CMake uses libc++.
-
-#### Can I use AirSim with Unreal 4.16?
-
-Yes! The `*.Build.cs` files are, however, no longer compatible (you will get a compile error). You can find files for 4.16 as `*.Build.4.16.cs` so just rename those.
+We use the same compiler that Unreal Engine uses, **Clang 5.0**, and stdlib, **libc++**. AirSim's `setup.sh` will automatically download them both. The libc++ source code is cloned into the `llvm-source-(version)` folder and is built into the `llvm-build` folder, from where CMake uses libc++.
 
 #### What version of CMake does the AirSim build use?
 
-3.5.0 or higher. This should be the default in Ubuntu 16.04. You can check your CMake version using `cmake --version`. If you have an older version, follow [these instructions](cmake_linux.md) or see the [CMake website](https://cmake.org/install/).
+3.9.0 or higher. This is *not* the default in Ubuntu 16.04 so setup.sh installs it for you. You can check your CMake version using `cmake --version`. If you have an older version, follow [these instructions](cmake_linux.md) or see the [CMake website](https://cmake.org/install/).
 
 #### Can I compile AirSim in BashOnWindows?
 

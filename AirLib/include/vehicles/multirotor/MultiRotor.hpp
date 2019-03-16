@@ -7,7 +7,8 @@
 #include "common/Common.hpp"
 #include "common/CommonStructs.hpp"
 #include "Rotor.hpp"
-#include "controllers/ControllerBase.hpp"
+#include "api/VehicleApiBase.hpp"
+#include "api/VehicleSimApiBase.hpp"
 #include "MultiRotorParams.hpp"
 #include <vector>
 #include "physics/PhysicsBody.hpp"
@@ -17,44 +18,11 @@ namespace msr { namespace airlib {
 
 class MultiRotor : public PhysicsBody {
 public:
-    MultiRotor()
+    MultiRotor(MultiRotorParams* params, VehicleApiBase* vehicle_api, 
+        Kinematics* kinematics, Environment* environment)
+        : params_(params), vehicle_api_(vehicle_api)
     {
-        //allow default constructor with later call for initialize
-    }
-    MultiRotor(MultiRotorParams* params, const Kinematics::State& initial_kinematic_state, Environment* environment)
-    {
-        initialize(params, initial_kinematic_state, environment);
-    }
-    void initialize(MultiRotorParams* params, const Pose& initial_pose, const GeoPoint& home_point, 
-        std::unique_ptr<Environment>& environment)
-    {
-        //init physics vehicle
-        auto initial_kinematics = Kinematics::State::zero();
-        initial_kinematics.pose = initial_pose;
-        Environment::State initial_environment;
-        initial_environment.position = initial_kinematics.pose.position;
-        initial_environment.geo_point = home_point;
-        environment.reset(new Environment(initial_environment));
-        
-        initialize(params, initial_kinematics, environment.get());
-    }
-    void initialize(MultiRotorParams* params, const Kinematics::State& initial_kinematic_state, Environment* environment)
-    {
-        params_ = params;
-
-        PhysicsBody::initialize(params_->getParams().mass, params_->getParams().inertia, initial_kinematic_state, environment);
-
-        createRotors(*params_, rotors_, environment);
-        createDragVertices();
-
-        initSensors(*params_, getKinematics(), getEnvironment());
-
-        getController()->setGroundTruth(this);
-    }
-
-    DroneControllerBase* getController()
-    {
-        return params_->getController();
+        initialize(kinematics, environment);
     }
 
     //*** Start: UpdatableState implementation ***//
@@ -63,20 +31,18 @@ public:
         //reset rotors, kinematics and environment
         PhysicsBody::reset();
 
-        //reset inputs
-        if (getController())
-            getController()->reset();
-
         //reset sensors last after their ground truth has been reset
         resetSensors();
     }
 
     virtual void update() override
     {
-        //update forces and environment as a result of last dt
+        //update forces on vertices that we will use next
         PhysicsBody::update();
 
-        //Note that controller gets updated after kinematics gets updated in kinematicsUpdated
+        //Note that controller gets updated after kinematics gets updated in updateKinematics
+        //otherwise sensors will have values from previous cycle causing lags which will appear
+        //as crazy jerks whenever commands like velocity is issued
     }
     virtual void reportState(StateReporter& reporter) override
     {
@@ -96,17 +62,20 @@ public:
     //*** End: UpdatableState implementation ***//
 
 
-    //implement abstract methods from PhysicsBody
-    virtual void kinematicsUpdated() override
+    //Physics engine calls this method to set next kinematics
+    virtual void updateKinematics(const Kinematics::State& kinematics) override
     {
+        PhysicsBody::updateKinematics(kinematics);
+
         updateSensors(*params_, getKinematics(), getEnvironment());
 
-        getController()->update();
+        //update controller which will update actuator control signal
+        vehicle_api_->update();
 
         //transfer new input values from controller to rotors
         for (uint rotor_index = 0; rotor_index < rotors_.size(); ++rotor_index) {
             rotors_.at(rotor_index).setControlSignal(
-                getController()->getVertexControlSignal(rotor_index));
+                vehicle_api_->getActuation(rotor_index));
         }
     }
 
@@ -157,15 +126,19 @@ public:
         return rotors_.at(rotor_index).getOutput();
     }
 
-    virtual void setCollisionInfo(const CollisionInfo& collision_info) override
-    {
-        PhysicsBody::setCollisionInfo(collision_info);
-        getController()->setCollisionInfo(collision_info);
-    }
-
     virtual ~MultiRotor() = default;
 
 private: //methods
+    void initialize(Kinematics* kinematics, Environment* environment)
+    {
+        PhysicsBody::initialize(params_->getParams().mass, params_->getParams().inertia, kinematics, environment);
+
+        createRotors(*params_, rotors_, environment);
+        createDragVertices();
+
+        initSensors(*params_, getKinematics(), getEnvironment());
+    }
+
     static void createRotors(const MultiRotorParams& params, vector<Rotor>& rotors, const Environment* environment)
     {
         rotors.clear();
@@ -234,6 +207,9 @@ private: //fields
     //let us be the owner of rotors object
     vector<Rotor> rotors_;
     vector<PhysicsBodyVertex> drag_vertices_;
+
+    std::unique_ptr<Environment> environment_;
+    VehicleApiBase* vehicle_api_;
 };
 
 }} //namespace

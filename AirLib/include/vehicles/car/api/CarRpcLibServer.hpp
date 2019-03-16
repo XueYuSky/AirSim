@@ -4,6 +4,8 @@
 #ifndef air_CarRpcLibServer_hpp
 #define air_CarRpcLibServer_hpp
 
+#ifndef AIRLIB_NO_RPC
+
 #include "common/Common.hpp"
 #include <functional>
 #include "api/RpcLibServerBase.hpp"
@@ -13,12 +15,17 @@ namespace msr { namespace airlib {
 
 class CarRpcLibServer : public RpcLibServerBase {
 public:
-    CarRpcLibServer(CarApiBase* vehicle, string server_address, uint16_t port = 42451);
+    CarRpcLibServer(ApiProvider* api_provider, string server_address, uint16_t port = 41451);
     virtual ~CarRpcLibServer();
 
-private:
-    CarApiBase* getCarApi();
+protected:
+    virtual CarApiBase* getVehicleApi(const std::string& vehicle_name) override
+    {
+        return static_cast<CarApiBase*>(RpcLibServerBase::getVehicleApi(vehicle_name));
+    }
 };
+
+#endif
 
 }} //namespace
 #endif

@@ -7,9 +7,8 @@
 #include "common/Common.hpp"
 #include "RotorParams.hpp"
 #include "sensors/SensorCollection.hpp"
-#include "controllers/DroneControllerBase.hpp"
-
-
+#include "sensors/SensorFactory.hpp"
+#include "vehicles/multirotor/api/MultirotorApiBase.hpp"
 
 namespace msr { namespace airlib {
 
@@ -26,14 +25,6 @@ public: //types
         RotorPose(const Vector3r& position_val, const Vector3r& normal_val, RotorTurningDirection direction_val)
             : position(position_val), normal(normal_val), direction(direction_val)
         {}
-    };
-
-    struct EnabledSensors {
-        bool imu = true;
-        bool magnetometer = true;
-        bool gps = true;
-        bool barometer = true;
-        bool distance = false; //this causes ray casts so disabled by default
     };
 
     struct Params {
@@ -53,22 +44,26 @@ public: //types
         real_T angular_drag_coefficient = linear_drag_coefficient; 
         real_T restitution = 0.55f; // value of 1 would result in perfectly elastic collisions, 0 would be completely inelastic.
         real_T friction = 0.5f;
-        EnabledSensors enabled_sensors;
         RotorParams rotor_params;
-
-        uint16_t api_server_port;
     };
 
+
+protected: //must override by derived class
+    virtual void setupParams() = 0;
+    virtual const SensorFactory* getSensorFactory() const = 0;
+
 public: //interface
-    virtual void initialize()
+    virtual std::unique_ptr<MultirotorApiBase> createMultirotorApi() = 0;
+
+    virtual ~MultiRotorParams() = default;
+    virtual void initialize(const AirSimSettings::VehicleSetting* vehicle_setting)
     {
         sensor_storage_.clear();
         sensors_.clear();
 
         setupParams();
 
-        addEnabledSensors(params_.enabled_sensors);
-        controller_ = createController();
+        addSensorsFromSettings(vehicle_setting);
     }
 
     const Params& getParams() const
@@ -87,48 +82,17 @@ public: //interface
     {
         return sensors_;
     }
-    DroneControllerBase* getController()
+
+    void addSensorsFromSettings(const AirSimSettings::VehicleSetting* vehicle_setting)
     {
-        return controller_.get();
+        // use sensors from vehicle settings; if empty list, use default sensors.
+        // note that the vehicle settings completely override the default sensor "list";
+        // there is no piecemeal add/remove/update per sensor.
+        const std::map<std::string, std::unique_ptr<AirSimSettings::SensorSetting>>& sensor_settings
+            = vehicle_setting->sensors.size() > 0 ? vehicle_setting->sensors : AirSimSettings::AirSimSettings::singleton().sensor_defaults;
+
+        getSensorFactory()->createSensorsFromSettings(sensor_settings, sensors_, sensor_storage_);
     }
-    const DroneControllerBase* getController() const
-    {
-        return controller_.get();
-    }
-
-    void addEnabledSensors(const EnabledSensors& enabled_sensors)
-    {
-        if (enabled_sensors.imu)
-            addSensor(SensorBase::SensorType::Imu);
-        if (enabled_sensors.magnetometer)
-            addSensor(SensorBase::SensorType::Magnetometer);
-        if (enabled_sensors.gps)
-            addSensor(SensorBase::SensorType::Gps);
-        if (enabled_sensors.barometer)
-            addSensor(SensorBase::SensorType::Barometer);
-        if (enabled_sensors.distance)
-            addSensor(SensorBase::SensorType::Distance);
-    }
-
-    SensorBase* addSensor(SensorBase::SensorType sensor_type)
-    {
-        std::unique_ptr<SensorBase> sensor = createSensor(sensor_type);
-        if (sensor) {
-            SensorBase* sensor_temp = sensor.get();
-            sensor_storage_.push_back(std::move(sensor));
-            sensors_.insert(sensor_temp, sensor_type);
-            return sensor_temp;
-        }
-        return nullptr;
-    }
-
-
-    virtual ~MultiRotorParams() = default;
-
-protected: //must override by derived class
-    virtual void setupParams() = 0;
-    virtual std::unique_ptr<SensorBase> createSensor(SensorBase::SensorType sensor_type) = 0;
-    virtual std::unique_ptr<DroneControllerBase> createController() = 0;
 
 protected: //static utility functions for derived classes to use
 
@@ -196,19 +160,20 @@ protected: //static utility functions for derived classes to use
             */
 
             // vectors below are rotated according to NED left hand rule (so the vectors are rotated counter clockwise).
-            Quaternionr quadx_rot(AngleAxisr(M_PIf / 6, unit_z));
+            Quaternionr hexa_rot30(AngleAxisr(M_PIf / 6, unit_z)); // 30 degrees
+            Quaternionr hexa_rot60(AngleAxisr(M_PIf / 3, unit_z)); // 60 degrees
             Quaternionr no_rot(AngleAxisr(0, unit_z));
             rotor_poses.emplace_back(VectorMath::rotateVector(Vector3r(0, arm_lengths[0], rotor_z), no_rot, true),
                 unit_z, RotorTurningDirection::RotorTurningDirectionCW);
             rotor_poses.emplace_back(VectorMath::rotateVector(Vector3r(0, -arm_lengths[1], rotor_z), no_rot, true),
                 unit_z, RotorTurningDirection::RotorTurningDirectionCCW);
-            rotor_poses.emplace_back(VectorMath::rotateVector(Vector3r(arm_lengths[2], 0, rotor_z), quadx_rot, true),
+            rotor_poses.emplace_back(VectorMath::rotateVector(Vector3r(arm_lengths[2], 0, rotor_z), hexa_rot30, true),
                 unit_z, RotorTurningDirection::RotorTurningDirectionCW);
-            rotor_poses.emplace_back(VectorMath::rotateVector(Vector3r(-arm_lengths[3], 0, rotor_z), quadx_rot, true),
+            rotor_poses.emplace_back(VectorMath::rotateVector(Vector3r(-arm_lengths[3], 0, rotor_z), hexa_rot30, true),
                 unit_z, RotorTurningDirection::RotorTurningDirectionCCW);
-            rotor_poses.emplace_back(VectorMath::rotateVector(Vector3r(0, arm_lengths[4], rotor_z), quadx_rot, true),
+            rotor_poses.emplace_back(VectorMath::rotateVector(Vector3r(0, arm_lengths[4], rotor_z), hexa_rot60, true),
                 unit_z, RotorTurningDirection::RotorTurningDirectionCCW);
-            rotor_poses.emplace_back(VectorMath::rotateVector(Vector3r(0, -arm_lengths[5], rotor_z), quadx_rot, true),
+            rotor_poses.emplace_back(VectorMath::rotateVector(Vector3r(0, -arm_lengths[5], rotor_z), hexa_rot60, true),
                 unit_z, RotorTurningDirection::RotorTurningDirectionCW);
         }
         else
@@ -216,7 +181,7 @@ protected: //static utility functions for derived classes to use
     }
 
     /// Initialize the rotor_poses given the rotor_count, the arm lengths and the arm angles (relative to forwards vector).
-    /// Also provide the direction you want to spin each rotor and the z-offsetof the rotors relative to the center of gravity.
+    /// Also provide the direction you want to spin each rotor and the z-offset of the rotors relative to the center of gravity.
     static void initializeRotors(vector<RotorPose>& rotor_poses, uint rotor_count, real_T arm_lengths[], real_T arm_angles[], RotorTurningDirection rotor_directions[], real_T rotor_z /* z relative to center of gravity */)
     {
         Vector3r unit_z(0, 0, -1);  //NED frame
@@ -251,7 +216,6 @@ private:
     Params params_;
     SensorCollection sensors_; //maintains sensor type indexed collection of sensors
     vector<unique_ptr<SensorBase>> sensor_storage_; //RAII for created sensors
-    std::unique_ptr<DroneControllerBase> controller_;
 };
 
 }} //namespace

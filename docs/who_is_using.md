@@ -18,4 +18,6 @@ Just add a [GitHub issue](https://github.com/microsoft/airsim/issues) with quick
 * [Robotics Institute, Carnegie Mellon University](https://www.ri.cmu.edu/)
 * [Texas A&M](https://www.tamu.edu/)
 * [Robotics and Perception Group, University of Zurich](http://rpg.ifi.uzh.ch/)
+* [National University of Ireland, Galway (NUIG)](http://www.nuigalway.ie/)
+* [Soda Mobility Technologies](http://sodacar.com)
 

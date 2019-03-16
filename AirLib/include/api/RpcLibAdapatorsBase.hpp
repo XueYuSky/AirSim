@@ -7,10 +7,14 @@
 #include "common/Common.hpp"
 #include "common/CommonStructs.hpp"
 #include "physics/Kinematics.hpp"
+#include "physics/Environment.hpp"
 #include "common/ImageCaptureBase.hpp"
 #include "safety/SafetyEval.hpp"
-#include "rpc/msgpack.hpp"
+#include "api/WorldSimApiBase.hpp"
 
+#include "common/common_utils/WindowsApisCommonPre.hpp"
+#include "rpc/msgpack.hpp"
+#include "common/common_utils/WindowsApisCommonPost.hpp"
 
 namespace msr { namespace airlib_rpclib {
 
@@ -146,12 +150,13 @@ public:
     struct RCData {
         uint64_t timestamp = 0;
         float pitch = 0, roll = 0, throttle = 0, yaw = 0;
-        unsigned int  switch1 = 0, switch2 = 0, switch3 = 0, switch4 = 0, 
-            switch5 = 0, switch6 = 0, switch7 = 0, switch8 = 0;
+        float left_z = 0, right_z = 0;
+        uint16_t switches = 0;
+        std::string vendor_id = "";
         bool is_initialized = false; //is RC connected?
         bool is_valid = false; //must be true for data to be valid
 
-        MSGPACK_DEFINE_MAP(timestamp, pitch, roll, throttle, yaw, switch1, switch2, switch3, switch4, switch5, switch6, switch7, switch8, is_initialized, is_valid);
+        MSGPACK_DEFINE_MAP(timestamp, pitch, roll, throttle, yaw, left_z, right_z, switches, vendor_id, is_initialized, is_valid);
 
         RCData()
         {}
@@ -163,14 +168,10 @@ public:
             roll = s.roll;
             throttle = s.throttle;
             yaw = s.yaw;
-            switch1 = s.switch1;
-            switch2 = s.switch2;
-            switch3 = s.switch3;
-            switch4 = s.switch4;
-            switch5 = s.switch5;
-            switch6 = s.switch6;
-            switch7 = s.switch7;
-            switch8 = s.switch8;
+            left_z = s.left_z;
+            right_z = s.right_z;
+            switches = s.switches;
+            vendor_id = s.vendor_id;
             is_initialized = s.is_initialized;
             is_valid = s.is_valid;
 
@@ -183,14 +184,10 @@ public:
             d.roll = roll;
             d.throttle = throttle;
             d.yaw = yaw;
-            d.switch1 = switch1;
-            d.switch2 = switch2;
-            d.switch3 = switch3;
-            d.switch4 = switch4;
-            d.switch5 = switch5;
-            d.switch6 = switch6;
-            d.switch7 = switch7;
-            d.switch8 = switch8;
+            d.left_z = left_z;
+            d.right_z = right_z;
+            d.switches = switches;
+            d.vendor_id = vendor_id;
             d.is_initialized = is_initialized;
             d.is_valid = is_valid;
             
@@ -198,11 +195,38 @@ public:
         }
     };
 
+    struct ProjectionMatrix {
+        float matrix[4][4];
+
+        MSGPACK_DEFINE_MAP(matrix);
+
+        ProjectionMatrix()
+        {
+        }
+
+        ProjectionMatrix(const msr::airlib::ProjectionMatrix& s)
+        {
+            for (auto i = 0; i < 4; ++i)
+                for (auto j = 0; j < 4; ++j)
+                    matrix[i][j] = s.matrix[i][j];
+        }
+
+        msr::airlib::ProjectionMatrix to() const
+        {
+            msr::airlib::ProjectionMatrix s;
+            for (auto i = 0; i < 4; ++i)
+                for (auto j = 0; j < 4; ++j)
+                    s.matrix[i][j] = matrix[i][j];
+            return s;
+        }
+    };
+
     struct CameraInfo {
         Pose pose;
         float fov;
+        ProjectionMatrix proj_mat;
 
-        MSGPACK_DEFINE_MAP(pose, fov);
+        MSGPACK_DEFINE_MAP(pose, fov, proj_mat);
 
         CameraInfo()
         {}
@@ -211,6 +235,7 @@ public:
         {
             pose = s.pose;
             fov = s.fov;
+            proj_mat = ProjectionMatrix(s.proj_mat);
         }
 
         msr::airlib::CameraInfo to() const
@@ -218,6 +243,7 @@ public:
             msr::airlib::CameraInfo s;
             s.pose = pose.to();
             s.fov = fov;
+            s.proj_mat = proj_mat.to();
 
             return s;
         }
@@ -263,20 +289,59 @@ public:
         }
     };
 
+    struct EnvironmentState {
+        Vector3r position;
+        GeoPoint geo_point;
+
+        //these fields are computed
+        Vector3r gravity;
+        float air_pressure;
+        float temperature;
+        float air_density;
+
+        MSGPACK_DEFINE_MAP(position, geo_point, gravity, air_pressure, temperature, air_density);
+
+        EnvironmentState()
+        {}
+
+        EnvironmentState(const msr::airlib::Environment::State& s)
+        {
+            position = s.position;
+            geo_point = s.geo_point;
+            gravity = s.gravity;
+            air_pressure = s.air_pressure;
+            temperature = s.temperature;
+            air_density = s.air_density;
+        }
+
+        msr::airlib::Environment::State to() const
+        {
+            msr::airlib::Environment::State s;
+            s.position = position.to();
+            s.geo_point = geo_point.to();
+            s.gravity = gravity.to();
+            s.air_pressure = air_pressure;
+            s.temperature = temperature;
+            s.air_density = air_density;
+
+            return s;
+        }
+    };
+
     struct ImageRequest {
-        uint8_t camera_id;
+        std::string camera_name;
         msr::airlib::ImageCaptureBase::ImageType image_type;
         bool pixels_as_float;
         bool compress;
 
-        MSGPACK_DEFINE_MAP(camera_id, image_type, pixels_as_float, compress);
+        MSGPACK_DEFINE_MAP(camera_name, image_type, pixels_as_float, compress);
 
         ImageRequest()
         {}
 
         ImageRequest(const msr::airlib::ImageCaptureBase::ImageRequest& s)
         {
-            camera_id = s.camera_id;
+            camera_name = s.camera_name;
             image_type = s.image_type;
             pixels_as_float = s.pixels_as_float;
             compress = s.compress;
@@ -285,7 +350,7 @@ public:
         msr::airlib::ImageCaptureBase::ImageRequest to() const
         {
             msr::airlib::ImageCaptureBase::ImageRequest d;
-            d.camera_id = camera_id;
+            d.camera_name = camera_name;
             d.image_type = image_type;
             d.pixels_as_float = pixels_as_float;
             d.compress = compress;
@@ -317,6 +382,7 @@ public:
         std::vector<uint8_t> image_data_uint8;
         std::vector<float> image_data_float;
 
+        std::string camera_name;
         Vector3r camera_position;
         Quaternionr camera_orientation;
         msr::airlib::TTimePoint time_stamp;
@@ -326,7 +392,7 @@ public:
         int width, height;
         msr::airlib::ImageCaptureBase::ImageType image_type;
 
-        MSGPACK_DEFINE_MAP(image_data_uint8, image_data_float, camera_position, 
+        MSGPACK_DEFINE_MAP(image_data_uint8, image_data_float, camera_position, camera_name,
             camera_orientation, time_stamp, message, pixels_as_float, compress, width, height, image_type);
 
         ImageResponse()
@@ -345,6 +411,7 @@ public:
             if (image_data_float.size() == 0)
                 image_data_float.push_back(0);
 
+            camera_name = s.camera_name;
             camera_position = Vector3r(s.camera_position);
             camera_orientation = Quaternionr(s.camera_orientation);
             time_stamp = s.time_stamp;
@@ -366,6 +433,7 @@ public:
             else
                 d.image_data_float = image_data_float;
 
+            d.camera_name = camera_name;
             d.camera_position = camera_position.to();
             d.camera_orientation = camera_orientation.to();
             d.time_stamp = time_stamp;
@@ -397,6 +465,41 @@ public:
             return response_adapter;
         }
     };
+
+    struct LidarData {
+
+        msr::airlib::TTimePoint time_stamp;    // timestamp
+        std::vector<float> point_cloud;        // data
+        Pose pose;
+
+        MSGPACK_DEFINE_MAP(time_stamp, point_cloud, pose);
+
+        LidarData()
+        {}
+
+        LidarData(const msr::airlib::LidarData& s)
+        {
+            time_stamp = s.time_stamp;
+            point_cloud = s.point_cloud;
+
+            //TODO: remove bug workaround for https://github.com/rpclib/rpclib/issues/152
+            if (point_cloud.size() == 0)
+                point_cloud.push_back(0);
+
+            pose = s.pose;
+        }
+
+        msr::airlib::LidarData to() const
+        {
+            msr::airlib::LidarData d;
+
+            d.time_stamp = time_stamp;
+            d.point_cloud = point_cloud;
+            d.pose = pose.to();
+
+            return d;
+        }
+    };
 };
 
 }} //namespace
@@ -404,6 +507,6 @@ public:
 MSGPACK_ADD_ENUM(msr::airlib::SafetyEval::SafetyViolationType_);
 MSGPACK_ADD_ENUM(msr::airlib::SafetyEval::ObsAvoidanceStrategy);
 MSGPACK_ADD_ENUM(msr::airlib::ImageCaptureBase::ImageType);
-
+MSGPACK_ADD_ENUM(msr::airlib::WorldSimApiBase::WeatherParameter);
 
 #endif

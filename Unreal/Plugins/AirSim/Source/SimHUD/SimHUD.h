@@ -5,6 +5,8 @@
 #include "SimHUDWidget.h"
 #include "SimMode/SimModeBase.h"
 #include "PIPCamera.h"
+#include "api/ApiServerBase.hpp"
+#include <memory>
 #include "SimHUD.generated.h"
 
 
@@ -40,19 +42,14 @@ public:
     void setSubwindowCamera(int window_index, APIPCamera* camera);
     bool getSubwindowVisible(int window_index);
     void setSubwindowVisible(int window_index, bool is_visible);
-
+    
     ASimHUD();
     virtual void BeginPlay() override;
     virtual void EndPlay(const EEndPlayReason::Type EndPlayReason) override;
     virtual void Tick(float DeltaSeconds) override;
 
-    static ASimHUD* GetInstance() {
-        return instance_;
-    }
-
 protected:
     virtual void setupInputBindings();
-    std::string reportRefreshHandler();
     void toggleRecordHandler();
     void updateWidgetSubwindowVisibility();
     bool isWidgetSubwindowVisible(int window_index);
@@ -72,7 +69,6 @@ private:
     bool readSettingsTextFromFile(FString fileName, std::string& settingsText);
     std::string getSimModeFromUser();
 
-
 private:
     typedef common_utils::Utils Utils;
     UClass* widget_class_;
@@ -81,6 +77,4 @@ private:
     UPROPERTY() ASimModeBase* simmode_;
 
     APIPCamera* subwindow_cameras_[AirSimSettings::kSubwindowCount];
-
-    static ASimHUD* instance_;
 };
