@@ -17,11 +17,6 @@ class VehicleSimApiBase : public msr::airlib::UpdatableObject {
 public:
     virtual ~VehicleSimApiBase() = default;
 
-    //default implementation so derived class doesn't have to call on UpdatableObject
-    virtual void reset() override
-    {
-        UpdatableObject::reset();
-    }
     virtual void update() override
     {
         UpdatableObject::update();
@@ -59,7 +54,10 @@ public:
     virtual const msr::airlib::Environment* getGroundTruthEnvironment() const = 0;
 
     virtual CameraInfo getCameraInfo(const std::string& camera_name) const = 0;
-    virtual void setCameraOrientation(const std::string& camera_name, const Quaternionr& orientation) = 0;
+    virtual void setCameraPose(const std::string& camera_name, const Pose& pose) = 0;
+    virtual void setCameraFoV(const std::string& camera_name, float fov_degrees) = 0;
+    virtual void setDistortionParam(const std::string& camera_name, const std::string& param_name, float value) = 0;
+    virtual std::vector<float> getDistortionParams(const std::string& camera_name) = 0;
 
     virtual CollisionInfo getCollisionInfo() const = 0;
     virtual int getRemoteControlID() const = 0; //which RC to use, 0 is first one, -1 means disable RC (use keyborad)
@@ -67,6 +65,7 @@ public:
     virtual std::string getVehicleName() const = 0;
     virtual std::string getRecordFileLine(bool is_header_line) const = 0;
     virtual void toggleTrace() = 0;
+    virtual void setTraceLine(const std::vector<float>& color_rgba, float thickness) = 0;
 
     //use pointer here because of derived classes for VehicleSetting
     const AirSimSettings::VehicleSetting* getVehicleSetting() const

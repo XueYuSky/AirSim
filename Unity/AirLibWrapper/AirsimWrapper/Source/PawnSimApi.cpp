@@ -146,9 +146,8 @@ AirSimPose PawnSimApi::GetInitialPose()
 	return AirSimPose(state_.start_location, state_.start_rotation);
 }
 
-void PawnSimApi::reset()
+void PawnSimApi::resetImplementation()
 {
-	VehicleSimApiBase::reset();
 	state_ = initial_state_;
 	rc_data_ = msr::airlib::RCData();
     kinematics_->reset();
@@ -184,6 +183,12 @@ void PawnSimApi::toggleTrace()
 	state_.tracing_enabled = !state_.tracing_enabled;
 }
 
+void PawnSimApi::setTraceLine(const std::vector<float>& color_rgba, float thickness)
+{
+    throw std::invalid_argument(common_utils::Utils::stringf(
+        "setTraceLine is not supported on unity").c_str());
+}
+
 void PawnSimApi::allowPassthroughToggleInput()
 {
 	state_.passthrough_enabled = !state_.passthrough_enabled;
@@ -205,16 +210,28 @@ msr::airlib::CameraInfo PawnSimApi::getCameraInfo(const std::string& camera_name
 	return camera_info;
 }
 
-void PawnSimApi::setCameraOrientation(const std::string& camera_name, const msr::airlib::Quaternionr& orientation)
+void PawnSimApi::setCameraPose(const std::string& camera_name, const msr::airlib::Pose& pose)
 {
-	AirSimQuaternion airSimOrientation;
-	airSimOrientation.x = orientation.x();
-	airSimOrientation.y = orientation.y();
-	airSimOrientation.z = orientation.z();
-	airSimOrientation.w = orientation.w();
-
-	SetCameraOrientation(camera_name.c_str(), airSimOrientation, params_.vehicle_name.c_str());
+	SetCameraPose(camera_name.c_str(), UnityUtilities::Convert_to_AirSimPose(pose), params_.vehicle_name.c_str());
 }
+
+void PawnSimApi::setCameraFoV(const std::string& camera_name, float fov_degrees)
+{
+	SetCameraFoV(camera_name.c_str(), fov_degrees, params_.vehicle_name.c_str());
+}
+
+void PawnSimApi::setDistortionParam(const std::string& camera_name, const std::string& param_name, float value)
+{
+	// not implemented
+}
+
+std::vector<float> PawnSimApi::getDistortionParams(const std::string& camera_name)
+{
+	// not implemented
+	std::vector<float> params(5, 0.0);
+	return params;
+}
+
 
 //parameters in NED frame
 PawnSimApi::Pose PawnSimApi::getPose() const

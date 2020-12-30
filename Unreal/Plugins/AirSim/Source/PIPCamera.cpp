@@ -1,10 +1,9 @@
 #include "PIPCamera.h"
-#include "ConstructorHelpers.h"
+#include "UObject/ConstructorHelpers.h"
 #include "Components/SceneCaptureComponent2D.h"
 #include "Camera/CameraComponent.h"
 #include "Engine/TextureRenderTarget2D.h"
 #include "Engine/World.h"
-#include "Materials/MaterialInstanceDynamic.h"
 #include "ImageUtils.h"
 
 #include <string>
@@ -23,7 +22,27 @@ APIPCamera::APIPCamera()
         UAirBlueprintLib::LogMessageString("Cannot create noise material for the PIPCamera", 
             "", LogDebugLevel::Failure);
 
+    static ConstructorHelpers::FObjectFinder<UMaterial> dist_mat_finder(TEXT("Material'/AirSim/HUDAssets/CameraDistortion.CameraDistortion'"));
+    if (dist_mat_finder.Succeeded())
+    {
+        distortion_material_static_ = dist_mat_finder.Object;
+        distortion_param_collection_ = Cast<UMaterialParameterCollection>(StaticLoadObject(UMaterialParameterCollection::StaticClass(), NULL, TEXT("'/AirSim/HUDAssets/DistortionParams.DistortionParams'")));
+    }
+    else
+        UAirBlueprintLib::LogMessageString("Cannot create distortion material for the PIPCamera",
+            "", LogDebugLevel::Failure);
+
     PrimaryActorTick.bCanEverTick = true;
+
+    image_type_to_pixel_format_map_.Add(0, EPixelFormat::PF_B8G8R8A8);
+    image_type_to_pixel_format_map_.Add(1, EPixelFormat::PF_DepthStencil); // not used. init_auto_format is called in setupCameraFromSettings() 
+    image_type_to_pixel_format_map_.Add(2, EPixelFormat::PF_DepthStencil); // not used for same reason as above
+    image_type_to_pixel_format_map_.Add(3, EPixelFormat::PF_DepthStencil); // not used for same reason as above 
+    image_type_to_pixel_format_map_.Add(4, EPixelFormat::PF_DepthStencil); // not used for same reason as above 
+    image_type_to_pixel_format_map_.Add(5, EPixelFormat::PF_B8G8R8A8);
+    image_type_to_pixel_format_map_.Add(6, EPixelFormat::PF_B8G8R8A8);
+    image_type_to_pixel_format_map_.Add(7, EPixelFormat::PF_B8G8R8A8);
+
 }
 
 void APIPCamera::PostInitializeComponents()
@@ -57,6 +76,7 @@ void APIPCamera::BeginPlay()
     Super::BeginPlay();
 
     noise_materials_.AddZeroed(imageTypeCount() + 1);
+    distortion_materials_.AddZeroed(imageTypeCount() + 1);
 
     //by default all image types are disabled
     camera_type_enabled_.assign(imageTypeCount(), false);
@@ -73,89 +93,98 @@ void APIPCamera::BeginPlay()
     gimbal_stabilization_ = 0;
     gimbald_rotator_ = this->GetActorRotation();
     this->SetActorTickEnabled(false);
+
+    if (distortion_param_collection_)
+        distortion_param_instance_ = this->GetWorld()->GetParameterCollectionInstance(distortion_param_collection_);
 }
 
 msr::airlib::ProjectionMatrix APIPCamera::getProjectionMatrix(const APIPCamera::ImageType image_type) const
 {
+    msr::airlib::ProjectionMatrix mat;
+
     //TODO: avoid the need to override const cast here
     const_cast<APIPCamera*>(this)->setCameraTypeEnabled(image_type, true);
     const USceneCaptureComponent2D* capture = const_cast<APIPCamera*>(this)->getCaptureComponent(image_type, false);
     if (capture) {
-        FMatrix proj_mat;
+        FMatrix proj_mat_transpose;
 
-	    float x_axis_multiplier;
-	    float y_axis_multiplier;
-		FIntPoint render_target_size(capture->TextureTarget->GetSurfaceWidth(), capture->TextureTarget->GetSurfaceHeight());
+        FIntPoint render_target_size(capture->TextureTarget->GetSurfaceWidth(), capture->TextureTarget->GetSurfaceHeight());
+        float x_axis_multiplier = 1.0f;
+        float y_axis_multiplier = render_target_size.X / (float)render_target_size.Y;
 
-	    if (render_target_size.X > render_target_size.Y)
-	    {
-		    // if the viewport is wider than it is tall
-		    x_axis_multiplier = 1.0f;
-		    y_axis_multiplier = render_target_size.X / static_cast<float>(render_target_size.Y);
-	    }
-	    else
-	    {
-		    // if the viewport is taller than it is wide
-		    x_axis_multiplier = render_target_size.Y / static_cast<float>(render_target_size.X);
-		    y_axis_multiplier = 1.0f;
-	    }
+        if (render_target_size.X < render_target_size.Y)
+        {
+            // if the viewport is taller than it is wide
+            x_axis_multiplier = render_target_size.Y / static_cast<float>(render_target_size.X);
+            y_axis_multiplier = 1.0f;
+        }
 
-	    if (capture->ProjectionType == ECameraProjectionMode::Orthographic)
-	    {
-		    check((int32)ERHIZBuffer::IsInverted);
-		    const float OrthoWidth = capture->OrthoWidth / 2.0f;
-		    const float OrthoHeight = capture->OrthoWidth / 2.0f * x_axis_multiplier / y_axis_multiplier;
+        if (capture->ProjectionType == ECameraProjectionMode::Orthographic)
+        {
+            check((int32)ERHIZBuffer::IsInverted);
+            const float OrthoWidth = capture->OrthoWidth / 2.0f;
+            const float OrthoHeight = capture->OrthoWidth / 2.0f * x_axis_multiplier / y_axis_multiplier;
 
-		    const float NearPlane = 0;
-		    const float FarPlane = WORLD_MAX / 8.0f;
+            const float NearPlane = 0;
+            const float FarPlane = WORLD_MAX / 8.0f;
 
-		    const float ZScale = 1.0f / (FarPlane - NearPlane);
-		    const float ZOffset = -NearPlane;
+            const float ZScale = 1.0f / (FarPlane - NearPlane);
+            const float ZOffset = -NearPlane;
 
-		    proj_mat = FReversedZOrthoMatrix(
-			    OrthoWidth,
-			    OrthoHeight,
-			    ZScale,
-			    ZOffset
-			    );
-	    }
-	    else
-	    {
-            float fov = Utils::degreesToRadians(capture->FOVAngle);
-		    if ((int32)ERHIZBuffer::IsInverted)
-		    {
-			    proj_mat = FReversedZPerspectiveMatrix(
-				    fov,
-				    fov,
-				    x_axis_multiplier,
-				    y_axis_multiplier,
-				    GNearClippingPlane,
-				    GNearClippingPlane
-				    );
-		    }
-		    else
-		    {
-			    proj_mat = FPerspectiveMatrix(
-				    fov,
-				    fov,
-				    x_axis_multiplier,
-				    y_axis_multiplier,
-				    GNearClippingPlane,
-				    GNearClippingPlane
-				    );
-		    }
-	    }
-        msr::airlib::ProjectionMatrix mat;
-        for (auto i = 0; i < 4; ++i)
-            for (auto j = 0; j < 4; ++j)
-                mat.matrix[i][j] = proj_mat.M[i][j];
-        return mat;
+            proj_mat_transpose = FReversedZOrthoMatrix(
+                OrthoWidth,
+                OrthoHeight,
+                ZScale,
+                ZOffset
+                );
+        }
+        else
+        {
+            float halfFov = Utils::degreesToRadians(capture->FOVAngle) / 2;
+            if ((int32)ERHIZBuffer::IsInverted)
+            {
+                proj_mat_transpose = FReversedZPerspectiveMatrix(
+                    halfFov,
+                    halfFov,
+                    x_axis_multiplier,
+                    y_axis_multiplier,
+                    GNearClippingPlane,
+                    GNearClippingPlane
+                    );
+            }
+            else
+            {
+                //The FPerspectiveMatrix() constructor actually returns the transpose of the perspective matrix.
+                proj_mat_transpose = FPerspectiveMatrix(
+                    halfFov,
+                    halfFov,
+                    x_axis_multiplier,
+                    y_axis_multiplier,
+                    GNearClippingPlane,
+                    GNearClippingPlane
+                    );
+            }
+        }
+        
+        //Takes a vector from NORTH-EAST-DOWN coordinates (AirSim) to EAST-UP-SOUTH coordinates (Unreal). Leaves W coordinate unchanged.
+        FMatrix coordinateChangeTranspose = FMatrix(
+            FPlane(0, 0, -1, 0),
+            FPlane(1, 0, 0, 0),
+            FPlane(0, -1, 0, 0),
+            FPlane(0, 0, 0, 1)
+        );
+
+        FMatrix projMatTransposeInAirSim = coordinateChangeTranspose * proj_mat_transpose;
+
+        //Copy the result to an airlib::ProjectionMatrix while taking transpose.
+        for (auto row = 0; row < 4; ++row)
+            for (auto col = 0; col < 4; ++col)
+                mat.matrix[col][row] = projMatTransposeInAirSim.M[row][col];
     }
-    else {
-        msr::airlib::ProjectionMatrix mat;
+    else
         mat.setTo(Utils::nan<float>());
-        return mat;
-    }
+
+    return mat;
 }
 
 void APIPCamera::Tick(float DeltaTime)
@@ -189,6 +218,18 @@ void APIPCamera::EndPlay(const EEndPlayReason::Type EndPlayReason)
 
     noise_material_static_ = nullptr;
     noise_materials_.Empty();
+
+    if (distortion_materials_.Num()) {
+        for (unsigned int image_type = 0; image_type < imageTypeCount(); ++image_type) {
+            if (distortion_materials_[image_type + 1])
+                captures_[image_type]->PostProcessSettings.RemoveBlendable(distortion_materials_[image_type + 1]);
+        }
+        if (distortion_materials_[0])
+            camera_->PostProcessSettings.RemoveBlendable(distortion_materials_[0]);
+    }
+
+    distortion_material_static_ = nullptr;
+    distortion_materials_.Empty();
 
     for (unsigned int image_type = 0; image_type < imageTypeCount(); ++image_type) {
         //use final color for all calculations
@@ -227,8 +268,12 @@ void APIPCamera::setCameraTypeEnabled(ImageType type, bool enabled)
     enableCaptureComponent(type, enabled);
 }
 
-void APIPCamera::setCameraOrientation(const FRotator& rotator)
+void APIPCamera::setCameraPose(const FTransform& pose)
 {
+    FVector position = pose.GetLocation();
+    this->SetActorRelativeLocation(pose.GetLocation());
+
+    FRotator rotator = pose.GetRotation().Rotator();
     if (gimbal_stabilization_ > 0) {
         gimbald_rotator_.Pitch = rotator.Pitch;
         gimbald_rotator_.Roll = rotator.Roll;
@@ -236,6 +281,15 @@ void APIPCamera::setCameraOrientation(const FRotator& rotator)
     }
     this->SetActorRelativeRotation(rotator);
 }
+
+void APIPCamera::setCameraFoV(float fov_degrees)
+{
+    int image_count = static_cast<int>(Utils::toNumeric(ImageType::Count));
+    for (int image_type = 0; image_type < image_count; ++image_type) {
+        captures_[image_type]->FOVAngle = fov_degrees;
+    }
+}
+
 
 void APIPCamera::setupCameraFromSettings(const APIPCamera::CameraSetting& camera_setting, const NedTransform& ned_transform)
 {
@@ -260,23 +314,51 @@ void APIPCamera::setupCameraFromSettings(const APIPCamera::CameraSetting& camera
         const auto& noise_setting = camera_setting.noise_settings.at(image_type);
 
         if (image_type >= 0) { //scene capture components
-            updateCaptureComponentSetting(captures_[image_type], render_targets_[image_type],
-                capture_setting, ned_transform);
+            switch (Utils::toEnum<ImageType>(image_type)) {
+                case ImageType::Scene:
+                case ImageType::Infrared:
+                    updateCaptureComponentSetting(captures_[image_type], render_targets_[image_type], 
+                        false, image_type_to_pixel_format_map_[image_type], capture_setting, ned_transform, 
+                        false);
+                    break;
 
+                case ImageType::Segmentation:
+                case ImageType::SurfaceNormals:                
+                    updateCaptureComponentSetting(captures_[image_type], render_targets_[image_type], 
+                        true, image_type_to_pixel_format_map_[image_type], capture_setting, ned_transform, 
+                        true);
+                    break;
+
+                default:
+                    updateCaptureComponentSetting(captures_[image_type], render_targets_[image_type], 
+                        true, image_type_to_pixel_format_map_[image_type], capture_setting, ned_transform,
+                        false);
+                    break;
+            }
+            setDistortionMaterial(image_type, captures_[image_type], captures_[image_type]->PostProcessSettings);
             setNoiseMaterial(image_type, captures_[image_type], captures_[image_type]->PostProcessSettings, noise_setting);
         }
         else { //camera component
             updateCameraSetting(camera_, capture_setting, ned_transform);
-
+            setDistortionMaterial(image_type, camera_, camera_->PostProcessSettings);
             setNoiseMaterial(image_type, camera_, camera_->PostProcessSettings, noise_setting);
         }
     }
 }
 
 void APIPCamera::updateCaptureComponentSetting(USceneCaptureComponent2D* capture, UTextureRenderTarget2D* render_target, 
-    const CaptureSetting& setting, const NedTransform& ned_transform)
+    bool auto_format, const EPixelFormat& pixel_format, const CaptureSetting& setting, const NedTransform& ned_transform,
+    bool force_linear_gamma)
 {
-    render_target->InitAutoFormat(setting.width, setting.height); //256 X 144, X 480
+    if (auto_format)
+    {
+        render_target->InitAutoFormat(setting.width, setting.height); //256 X 144, X 480
+    }
+    else
+    {
+        render_target->InitCustomFormat(setting.width, setting.height, pixel_format, force_linear_gamma);
+    } 
+
     if (!std::isnan(setting.target_gamma))
         render_target->TargetGamma = setting.target_gamma;
 
@@ -364,30 +446,36 @@ void APIPCamera::updateCameraPostProcessingSetting(FPostProcessSettings& obj, co
     }
 }
 
+void APIPCamera::setDistortionMaterial(int image_type, UObject* outer, FPostProcessSettings& obj)
+{
+    UMaterialInstanceDynamic* distortion_material = UMaterialInstanceDynamic::Create(distortion_material_static_, outer);
+    distortion_materials_[image_type + 1] = distortion_material;
+    obj.AddBlendable(distortion_material, 1.0f);
+}
+
 void APIPCamera::setNoiseMaterial(int image_type, UObject* outer, FPostProcessSettings& obj, const NoiseSetting& settings)
 {
     if (!settings.Enabled)
         return;
 
-    UMaterialInstanceDynamic* noise_material_ = UMaterialInstanceDynamic::Create(noise_material_static_, outer);
-    noise_materials_[image_type + 1] = noise_material_;
+    UMaterialInstanceDynamic* noise_material = UMaterialInstanceDynamic::Create(noise_material_static_, outer);
+    noise_materials_[image_type + 1] = noise_material;
 
+    noise_material->SetScalarParameterValue("HorzWaveStrength", settings.HorzWaveStrength);
+    noise_material->SetScalarParameterValue("RandSpeed", settings.RandSpeed);
+    noise_material->SetScalarParameterValue("RandSize", settings.RandSize);
+    noise_material->SetScalarParameterValue("RandDensity", settings.RandDensity);
+    noise_material->SetScalarParameterValue("RandContrib", settings.RandContrib);
+    noise_material->SetScalarParameterValue("HorzWaveContrib", settings.HorzWaveContrib);
+    noise_material->SetScalarParameterValue("HorzWaveVertSize", settings.HorzWaveVertSize);
+    noise_material->SetScalarParameterValue("HorzWaveScreenSize", settings.HorzWaveScreenSize);
+    noise_material->SetScalarParameterValue("HorzNoiseLinesContrib", settings.HorzNoiseLinesContrib);
+    noise_material->SetScalarParameterValue("HorzNoiseLinesDensityY", settings.HorzNoiseLinesDensityY);
+    noise_material->SetScalarParameterValue("HorzNoiseLinesDensityXY", settings.HorzNoiseLinesDensityXY);
+    noise_material->SetScalarParameterValue("HorzDistortionStrength", settings.HorzDistortionStrength);
+    noise_material->SetScalarParameterValue("HorzDistortionContrib", settings.HorzDistortionContrib);
 
-    noise_material_->SetScalarParameterValue("HorzWaveStrength", settings.HorzWaveStrength);
-    noise_material_->SetScalarParameterValue("RandSpeed", settings.RandSpeed);
-    noise_material_->SetScalarParameterValue("RandSize", settings.RandSize);
-    noise_material_->SetScalarParameterValue("RandDensity", settings.RandDensity);
-    noise_material_->SetScalarParameterValue("RandContrib", settings.RandContrib);
-    noise_material_->SetScalarParameterValue("HorzWaveContrib", settings.HorzWaveContrib);
-    noise_material_->SetScalarParameterValue("HorzWaveVertSize", settings.HorzWaveVertSize);
-    noise_material_->SetScalarParameterValue("HorzWaveScreenSize", settings.HorzWaveScreenSize);
-    noise_material_->SetScalarParameterValue("HorzNoiseLinesContrib", settings.HorzNoiseLinesContrib);
-    noise_material_->SetScalarParameterValue("HorzNoiseLinesDensityY", settings.HorzNoiseLinesDensityY);
-    noise_material_->SetScalarParameterValue("HorzNoiseLinesDensityXY", settings.HorzNoiseLinesDensityXY);
-    noise_material_->SetScalarParameterValue("HorzDistortionStrength", settings.HorzDistortionStrength);
-    noise_material_->SetScalarParameterValue("HorzDistortionContrib", settings.HorzDistortionContrib);
-
-    obj.AddBlendable(noise_material_, 1.0f);
+    obj.AddBlendable(noise_material, 1.0f);
 }
 
 void APIPCamera::enableCaptureComponent(const APIPCamera::ImageType type, bool is_enabled)

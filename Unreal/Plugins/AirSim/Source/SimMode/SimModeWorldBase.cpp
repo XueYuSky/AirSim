@@ -33,6 +33,7 @@ void ASimModeWorldBase::startAsyncUpdator()
 {
     physics_world_->startAsyncUpdator();
 }
+
 void ASimModeWorldBase::stopAsyncUpdator()
 {
     physics_world_->stopAsyncUpdator();
@@ -61,6 +62,8 @@ std::unique_ptr<ASimModeWorldBase::PhysicsEngineBase> ASimModeWorldBase::createP
         else {
             physics_engine.reset(new msr::airlib::FastPhysicsEngine());
         }
+
+        physics_engine->setWind(getSettings().wind);
     }
     else {
         physics_engine.reset();
@@ -78,12 +81,28 @@ bool ASimModeWorldBase::isPaused() const
 void ASimModeWorldBase::pause(bool is_paused)
 {
     physics_world_->pause(is_paused);
+    UGameplayStatics::SetGamePaused(this->GetWorld(), is_paused);
 }
 
 void ASimModeWorldBase::continueForTime(double seconds)
 {
-    physics_world_->continueForTime(seconds);
+    if(physics_world_->isPaused())
+    {
+        physics_world_->pause(false);
+        UGameplayStatics::SetGamePaused(this->GetWorld(), false);        
+    }
 
+    physics_world_->continueForTime(seconds);
+    while(!physics_world_->isPaused())
+    {
+        continue; 
+    }
+    UGameplayStatics::SetGamePaused(this->GetWorld(), true);
+}
+
+void ASimModeWorldBase::setWind(const msr::airlib::Vector3r& wind) const
+{
+    physics_engine_->setWind(wind);
 }
 
 void ASimModeWorldBase::updateDebugReport(msr::airlib::StateReporterWrapper& debug_reporter)

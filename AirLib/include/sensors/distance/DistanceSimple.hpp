@@ -14,7 +14,7 @@
 
 namespace msr { namespace airlib {
 
-class DistanceSimple  : public DistanceBase {
+class DistanceSimple : public DistanceBase {
 public:
     DistanceSimple(const AirSimSettings::DistanceSetting& setting = AirSimSettings::DistanceSetting())
         : DistanceBase(setting.sensor_name)
@@ -32,13 +32,10 @@ public:
     }
 
     //*** Start: UpdatableState implementation ***//
-    virtual void reset() override
+    virtual void resetImplementation() override
     {
-        DistanceBase::reset();
-
         //correlated_noise_.reset();
         uncorrelated_noise_.reset();
-
 
         freq_limiter_.reset();
         delay_line_.reset();
@@ -65,17 +62,18 @@ public:
 
     virtual ~DistanceSimple() = default;
 
-protected:
-    virtual real_T getRayLength(const Pose& pose) = 0;
-    const DistanceSimpleParams& getParams()
+    const DistanceSimpleParams& getParams() const
     {
         return params_;
     }
 
+protected:
+    virtual real_T getRayLength(const Pose& pose) = 0;
+
 private: //methods
-    Output getOutputInternal()
+    DistanceSensorData getOutputInternal()
     {
-        Output output;
+        DistanceSensorData output;
         const GroundTruth& ground_truth = getGroundTruth();
 
         //order of Pose addition is important here because it also adds quaternions which is not commutative!
@@ -88,6 +86,7 @@ private: //methods
         output.min_distance = params_.min_distance;
         output.max_distance = params_.max_distance;
         output.relative_pose = params_.relative_pose;
+        output.time_stamp = clock()->nowNanos();
 
         return output;
     }
@@ -99,7 +98,7 @@ private:
     RandomGeneratorGausianR uncorrelated_noise_;
 
     FrequencyLimiter freq_limiter_;
-    DelayLine<Output> delay_line_;
+    DelayLine<DistanceSensorData> delay_line_;
 
     //start time
 };

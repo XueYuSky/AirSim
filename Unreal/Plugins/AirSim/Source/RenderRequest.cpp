@@ -1,7 +1,7 @@
 #include "RenderRequest.h"
 #include "TextureResource.h"
 #include "Engine/TextureRenderTarget2D.h"
-#include "TaskGraphInterfaces.h"
+#include "Async/TaskGraphInterfaces.h"
 #include "ImageUtils.h"
 
 #include "AirBlueprintLib.h"
@@ -74,13 +74,12 @@ void RenderRequest::getScreenshot(std::shared_ptr<RenderParams> params[], std::v
                 // The completion is called immeidately after GameThread sends the
                 // rendering commands to RenderThread. Hence, our ExecuteTask will
                 // execute *immediately* after RenderThread renders the scene!
-                ENQUEUE_UNIQUE_RENDER_COMMAND_ONEPARAMETER(
-                    SceneDrawCompletion,
-                    RenderRequest *, This, this,
-                    {
-                        This->ExecuteTask();
-                    }
-                );
+                RenderRequest* This = this;
+                ENQUEUE_RENDER_COMMAND(SceneDrawCompletion)(
+                [This](FRHICommandListImmediate& RHICmdList)
+                {
+                    This->ExecuteTask();
+                });
 
                 game_viewport_->bDisableWorldRendering = saved_DisableWorldRendering_;
 
@@ -106,16 +105,15 @@ void RenderRequest::getScreenshot(std::shared_ptr<RenderParams> params[], std::v
     for (unsigned int i = 0; i < req_size; ++i) {
         if (!params[i]->pixels_as_float) {
             if (results[i]->width != 0 && results[i]->height != 0) {
-                results[i]->image_data_uint8.SetNumUninitialized(results[i]->width * results[i]->height * 4, false);
+                results[i]->image_data_uint8.SetNumUninitialized(results[i]->width * results[i]->height * 3, false);
                 if (params[i]->compress)
                     UAirBlueprintLib::CompressImageArray(results[i]->width, results[i]->height, results[i]->bmp, results[i]->image_data_uint8);
                 else {
                     uint8* ptr = results[i]->image_data_uint8.GetData();
                     for (const auto& item : results[i]->bmp) {
-                        *ptr++ = item.R;
-                        *ptr++ = item.G;
                         *ptr++ = item.B;
-                        *ptr++ = item.A;
+                        *ptr++ = item.G;
+                        *ptr++ = item.R;
                     }
                 }
             }

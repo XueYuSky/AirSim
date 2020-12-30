@@ -12,11 +12,6 @@ namespace msr { namespace airlib {
 
 class PhysicsEngineBase : public UpdatableObject {
 public:
-    virtual void reset() override
-    {
-        UpdatableObject::reset();
-    }
-
     virtual void update() override
     {
         UpdatableObject::update();
@@ -48,6 +43,8 @@ public:
     virtual void insert(TUpdatableObjectPtr member) { members_.push_back(member);  }
     virtual void erase_remove(TUpdatableObjectPtr obj) { 
         members_.erase(std::remove(members_.begin(), members_.end(), obj), members_.end()); }
+
+    virtual void setWind(const Vector3r& wind) {};
 
 private:
     MembersContainer members_;

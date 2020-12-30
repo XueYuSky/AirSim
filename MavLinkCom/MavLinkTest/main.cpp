@@ -22,12 +22,8 @@ STRICT_MODE_OFF
 STRICT_MODE_ON
 #include "UnitTests.h"
 
-#if defined(_WIN32) || ((defined __cplusplus) && (__cplusplus >= 201700L))
 #include <filesystem>
-#define USE_CPP_FILESYSTEM
-#else
-#undef USE_CPP_FILESYSTEM
-#endif
+using namespace std::filesystem;
 
 /* enable math defines on Windows */
 
@@ -38,6 +34,7 @@ STRICT_MODE_ON
 static const int pixhawkVendorId = 9900;   ///< Vendor ID for Pixhawk board (V2 and V1) and PX4 Flow
 static const int pixhawkFMUV4ProductId = 18;     ///< Product ID for Pixhawk V2 board
 static const int pixhawkFMUV2ProductId = 17;     ///< Product ID for Pixhawk V2 board
+static const int pixhawkFMUV5ProductId = 50;     ///< Product ID for Pixhawk V5 board
 static const int pixhawkFMUV2OldBootloaderProductId = 22;     ///< Product ID for Bootloader on older Pixhawk V2 boards
 //static const int pixhawkFMUV1ProductId = 16;     ///< Product ID for PX4 FMU V1 board
 
@@ -79,6 +76,7 @@ void DebugOutput(const char* message, ...) {
 }
 #else 
 // how do you write to the debug output windows on Unix ?
+ __attribute__((__format__ (__printf__, 1, 0))) 
 void DebugOutput(const char* message, ...) {
     va_list args;
     va_start(args, message);
@@ -121,7 +119,7 @@ PortAddress serverEndPoint;
 
 bool connectLogViewer = false;
 PortAddress logViewerEndPoint;
-#define DEFAULT_LOGVIEWER_PORT 14570
+#define DEFAULT_LOGVIEWER_PORT 14388
 
 // These are used to echo the mavlink messages to other 3rd party apps like QGC or LogViewer.
 std::vector<PortAddress> proxyEndPoints;
@@ -152,15 +150,6 @@ std::shared_ptr<MavLinkConnection> droneConnection;
 std::shared_ptr<MavLinkConnection> logConnection;
 std::shared_ptr<MavLinkVehicle> mavLinkVehicle;
 
-
-#if defined(USE_CPP_FILESYSTEM)
-
-//can't use experimental stuff on Linux because of potential ABI issues
-#if defined(_WIN32) || ((defined __cplusplus) && (__cplusplus < 201700L))
-using namespace std::experimental::filesystem;
-#else
-using namespace std::filesystem;
-#endif
 
 void ConvertLogFileToJson(std::string logFile)
 {
@@ -392,9 +381,6 @@ void ConvertLogFilesToCsv(std::string directory)
         }
     }
 }
-
-
-#endif
 
 void OpenLogFiles() {
     if (logDirectory.size() > 0)
@@ -1030,10 +1016,13 @@ std::string findPixhawk() {
     {
         SerialPortInfo info = *iter;
         if (info.vid == pixhawkVendorId) {
-            if (info.pid == pixhawkFMUV4ProductId || info.pid == pixhawkFMUV2ProductId || info.pid == pixhawkFMUV2OldBootloaderProductId)
+            if (info.pid == pixhawkFMUV4ProductId || info.pid == pixhawkFMUV2ProductId || info.pid == pixhawkFMUV2OldBootloaderProductId || info.pid == pixhawkFMUV5ProductId)
             {
                 printf("Auto Selecting COM port: %S\n", info.displayName.c_str());
-                return std::string(info.portName.begin(), info.portName.end());
+
+                std::wstring_convert<std::codecvt_utf8<wchar_t>, wchar_t> converter;
+                std::string portName_str = converter.to_bytes(info.portName);
+                return portName_str;
             }
         }
     }
@@ -1068,7 +1057,7 @@ std::shared_ptr<MavLinkConnection> connectServer(const PortAddress& endPoint, st
 
 void runTelemetry() {
     while (telemetry) {
-        std::this_thread::sleep_for(std::chrono::milliseconds(100));
+        std::this_thread::sleep_for(std::chrono::seconds(1));
         if (droneConnection != nullptr) {
             MavLinkTelemetry tel;
             tel.wifiInterfaceName = ifaceName.c_str();
@@ -1122,13 +1111,6 @@ bool connect()
         usedPorts.push_back(offboardEndPoint);
     }
 
-    if (verbose) {
-        droneConnection->subscribe([=](std::shared_ptr<MavLinkConnection> con, const MavLinkMessage& msg) {
-            printf("Received msg %d from drone\n", static_cast<int>(msg.msgid));
-        });
-    }
-
-
     if (server)
     {
         if (serverEndPoint.addr == "") {
@@ -1152,6 +1134,12 @@ bool connect()
     {
         // failed to connect
         return false;
+    }
+
+    if (verbose) {
+        droneConnection->subscribe([=](std::shared_ptr<MavLinkConnection> con, const MavLinkMessage& msg) {
+            printf("Received msg %d from drone\n", static_cast<int>(msg.msgid));
+            });
     }
 
     if (outLogFile != nullptr) {

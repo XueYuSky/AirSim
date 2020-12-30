@@ -64,7 +64,7 @@ protected:
 public:
     virtual void initialize() override;
 	PawnSimApi(const Params& params);
-	virtual void reset() override;
+	virtual void resetImplementation() override;
 	virtual void update() override;
 	virtual const UnityImageCapture* getImageCapture() const override;
 	virtual std::vector<ImageCaptureBase::ImageResponse> getImages(const std::vector<ImageCaptureBase::ImageRequest>& request) const override;
@@ -72,7 +72,10 @@ public:
 	virtual Pose getPose() const override;
 	virtual void setPose(const Pose& pose, bool ignore_collision) override;
 	virtual msr::airlib::CameraInfo getCameraInfo(const std::string& camera_name) const override;
-	virtual void setCameraOrientation(const std::string& camera_name, const Quaternionr& orientation) override;
+	virtual void setCameraPose(const std::string& camera_name, const Pose& pose) override;
+	virtual void setCameraFoV(const std::string& camera_name, float fov_degrees) override;
+	virtual void setDistortionParam(const std::string& camera_name, const std::string& param_name, float value) override;
+	virtual std::vector<float> getDistortionParams(const std::string& camera_name) override;
 	virtual CollisionInfo getCollisionInfo() const override;
 	virtual int getRemoteControlID() const override;
 	virtual msr::airlib::RCData getRCData() const override;
@@ -81,6 +84,7 @@ public:
 		return params_.vehicle_name;
 	}
 	virtual void toggleTrace() override;
+	virtual void setTraceLine(const std::vector<float>& color_rgba, float thickness) override;
 	virtual void updateRenderedState(float dt) override;
 	virtual void updateRendering(float dt) override;
 	virtual const msr::airlib::Kinematics::State* getGroundTruthKinematics() const override;

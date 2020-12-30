@@ -32,10 +32,8 @@ public:
     }
 
     //*** Start: UpdatableObject implementation ***//
-    virtual void reset() override
+    virtual void resetImplementation() override
     {
-        MagnetometerBase::reset();
-
         //Ground truth is reset before sensors are reset
         updateReference(getGroundTruth());
         noise_vec_.reset();
@@ -94,6 +92,9 @@ private: //methods
             ground_truth.kinematics->pose.orientation, true) * params_.scale_factor
             + noise_vec_.next()
             + bias_vec_;
+
+        // todo output.magnetic_field_covariance ? 
+        output.time_stamp = clock()->nowNanos();
 
         return output;
     }

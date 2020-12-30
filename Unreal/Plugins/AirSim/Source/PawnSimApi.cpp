@@ -10,6 +10,7 @@
 #include "NedTransform.h"
 #include "common/EarthUtils.hpp"
 
+#include "Materials/MaterialParameterCollectionInstance.h"
 #include "DrawDebugHelpers.h"
 
 PawnSimApi::PawnSimApi(const Params& params)
@@ -219,6 +220,7 @@ msr::airlib::RCData PawnSimApi::getRCData() const
 {
     joystick_.getJoyStickState(getRemoteControlID(), joystick_state_);
 
+    rc_data_.is_initialized = joystick_state_.is_initialized;
     rc_data_.is_valid = joystick_state_.is_valid;
 
     if (rc_data_.is_valid) {
@@ -287,10 +289,8 @@ int PawnSimApi::getCameraCount()
     return cameras_.valsSize();
 }
 
-void PawnSimApi::reset()
+void PawnSimApi::resetImplementation()
 {
-    VehicleSimApiBase::reset();
-
     state_ = initial_state_;
     rc_data_ = msr::airlib::RCData();
     params_.pawn->SetActorLocationAndRotation(state_.start_location, state_.start_rotation, false, nullptr, ETeleportType::TeleportPhysics);
@@ -364,6 +364,12 @@ void PawnSimApi::toggleTrace()
     }
 }
 
+void PawnSimApi::setTraceLine(const std::vector<float>& color_rgba, float thickness) {
+    FLinearColor color {color_rgba[0], color_rgba[1], color_rgba[2], color_rgba[3]};
+    trace_color_ = color.ToFColor(true);
+    trace_thickness_ = thickness;
+}
+
 void PawnSimApi::allowPassthroughToggleInput()
 {
     state_.passthrough_enabled = !state_.passthrough_enabled;
@@ -385,7 +391,7 @@ void PawnSimApi::plot(std::istream& s, FColor color, const Vector3r& offset)
         Vector3r current_point(x, y, z);
         current_point += offset;
         if (!VectorMath::hasNan(last_point)) {
-            UKismetSystemLibrary::DrawDebugLine(params_.pawn->GetWorld(), ned_transform_.fromLocalNed(last_point), ned_transform_.fromLocalNed(current_point), color, 0, 3.0F);
+            DrawDebugLine(params_.pawn->GetWorld(), ned_transform_.fromLocalNed(last_point), ned_transform_.fromLocalNed(current_point), color, true, -1.0F, 0, 3.0F);
         }
         last_point = current_point;
     }
@@ -404,13 +410,44 @@ msr::airlib::CameraInfo PawnSimApi::getCameraInfo(const std::string& camera_name
     return camera_info;
 }
 
-void PawnSimApi::setCameraOrientation(const std::string& camera_name, const msr::airlib::Quaternionr& orientation)
+void PawnSimApi::setCameraPose(const std::string& camera_name, const msr::airlib::Pose& pose)
 {
-    UAirBlueprintLib::RunCommandOnGameThread([this, camera_name, orientation]() {
+    UAirBlueprintLib::RunCommandOnGameThread([this, camera_name, pose]() {
         APIPCamera* camera = getCamera(camera_name);
-        FQuat quat = ned_transform_.fromNed(orientation);
-        camera->setCameraOrientation(quat.Rotator());
+        FTransform pose_unreal = ned_transform_.fromRelativeNed(pose);
+        camera->setCameraPose(pose_unreal);
     }, true);
+}
+
+void PawnSimApi::setCameraFoV(const std::string& camera_name, float fov_degrees)
+{
+    UAirBlueprintLib::RunCommandOnGameThread([this, camera_name, fov_degrees]() {
+        APIPCamera* camera = getCamera(camera_name);
+        camera->setCameraFoV(fov_degrees);
+    }, true);
+}
+
+void PawnSimApi::setDistortionParam(const std::string& camera_name, const std::string& param_name, float value)
+{
+    UAirBlueprintLib::RunCommandOnGameThread([this, camera_name, param_name, value]() {
+        APIPCamera* camera = getCamera(camera_name);
+        camera->distortion_param_instance_->SetScalarParameterValue(FName(param_name.c_str()), value);
+    }, true);
+}
+
+std::vector<float> PawnSimApi::getDistortionParams(const std::string& camera_name)
+{
+    std::vector<float> param_values(5, 0.0);
+    UAirBlueprintLib::RunCommandOnGameThread([this, camera_name, &param_values]() {
+        APIPCamera* camera = getCamera(camera_name);
+        camera->distortion_param_instance_->GetScalarParameterValue(FName(TEXT("K1")), param_values[0]);
+        camera->distortion_param_instance_->GetScalarParameterValue(FName(TEXT("K2")), param_values[1]);
+        camera->distortion_param_instance_->GetScalarParameterValue(FName(TEXT("K3")), param_values[2]);
+        camera->distortion_param_instance_->GetScalarParameterValue(FName(TEXT("P1")), param_values[3]);
+        camera->distortion_param_instance_->GetScalarParameterValue(FName(TEXT("P2")), param_values[4]);
+    }, true);
+
+    return param_values;
 }
 
 //parameters in NED frame
@@ -456,7 +493,7 @@ void PawnSimApi::setPoseInternal(const Pose& pose, bool ignore_collision)
         params_.pawn->SetActorLocationAndRotation(position, orientation, true);
 
     if (state_.tracing_enabled && (state_.last_position - position).SizeSquared() > 0.25) {
-        UKismetSystemLibrary::DrawDebugLine(params_.pawn->GetWorld(), state_.last_position, position, FColor::Purple, -1, 3.0f);
+        DrawDebugLine(params_.pawn->GetWorld(), state_.last_position, position, trace_color_, true, -1.0F, 0, trace_thickness_);
         state_.last_position = position;
     }
     else if (!state_.tracing_enabled) {
@@ -470,7 +507,7 @@ void PawnSimApi::setDebugPose(const Pose& debug_pose)
     if (state_.tracing_enabled && !VectorMath::hasNan(debug_pose.position)) {
         FVector debug_position = state_.current_debug_position - state_.debug_position_offset;
         if ((state_.last_debug_position - debug_position).SizeSquared() > 0.25) {
-            UKismetSystemLibrary::DrawDebugLine(params_.pawn->GetWorld(), state_.last_debug_position, debug_position, FColor(0xaa, 0x33, 0x11), -1, 10.0F);
+            DrawDebugLine(params_.pawn->GetWorld(), state_.last_debug_position, debug_position, FColor(0xaa, 0x33, 0x11), true, -1.0F, 0, 10.0F);
             UAirBlueprintLib::LogMessage(FString("Debug Pose: "), debug_position.ToCompactString(), LogDebugLevel::Informational);
             state_.last_debug_position = debug_position;
         }
@@ -497,12 +534,12 @@ void PawnSimApi::updateKinematics(float dt)
     auto next_kinematics = kinematics_->getState();
 
     next_kinematics.pose = getPose();
-    next_kinematics.twist.linear = getNedTransform().toLocalNed(getPawn()->GetVelocity());
+    next_kinematics.twist.linear = getNedTransform().toLocalNedVelocity(getPawn()->GetVelocity());
     next_kinematics.twist.angular = msr::airlib::VectorMath::toAngularVelocity(
         kinematics_->getPose().orientation, next_kinematics.pose.orientation, dt);
 
-    next_kinematics.accelerations.linear = (next_kinematics.twist.linear - kinematics_->getTwist().linear) / dt;
-    next_kinematics.accelerations.angular = (next_kinematics.twist.angular - kinematics_->getTwist().angular) / dt;
+    next_kinematics.accelerations.linear = dt > 0 ? (next_kinematics.twist.linear - kinematics_->getTwist().linear) / dt : next_kinematics.accelerations.linear;
+    next_kinematics.accelerations.angular = dt > 0 ? (next_kinematics.twist.angular - kinematics_->getTwist().angular) / dt : next_kinematics.accelerations.angular;
 
     kinematics_->setState(next_kinematics);
     kinematics_->update();

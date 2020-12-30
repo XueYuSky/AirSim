@@ -6,6 +6,7 @@ import os
 import inspect
 import types
 import re
+import logging
 
 from .types import *
 
@@ -41,6 +42,10 @@ def to_str(obj):
 
     
 def write_file(filename, bstr):
+    """
+    Write binary data to file.
+    Used for writing compressed PNG images
+    """
     with open(filename, 'wb') as afile:
         afile.write(bstr)
 
@@ -157,7 +162,6 @@ def read_pfm(file):
 
     data = np.reshape(data, shape)
     # DEY: I don't know why this was there.
-    #data = np.flipud(data)
     file.close()
     
     return data, scale
@@ -172,11 +176,9 @@ def write_pfm(file, image, scale=1):
     if image.dtype.name != 'float32':
         raise Exception('Image dtype must be float32.')
 
-    image = np.flipud(image)
-
     if len(image.shape) == 3 and image.shape[2] == 3: # color image
         color = True
-    elif len(image.shape) == 2 or len(image.shape) == 3 and image.shape[2] == 1: # greyscale
+    elif len(image.shape) == 2 or len(image.shape) == 3 and image.shape[2] == 1: # grayscale
         color = False
     else:
         raise Exception('Image must have H x W x 3, H x W x 1 or H x W dimensions.')
@@ -199,27 +201,8 @@ def write_pfm(file, image, scale=1):
 def write_png(filename, image):
     """ image must be numpy array H X W X channels
     """
-    import zlib, struct
+    import cv2      # pip install opencv-python
 
-    buf = image.flatten().tobytes()
-    width = image.shape[1]
-    height = image.shape[0]
-
-    # reverse the vertical line order and add null bytes at the start
-    width_byte_4 = width * 4
-    raw_data = b''.join(b'\x00' + buf[span:span + width_byte_4]
-                        for span in range((height - 1) * width_byte_4, -1, - width_byte_4))
-
-    def png_pack(png_tag, data):
-        chunk_head = png_tag + data
-        return (struct.pack("!I", len(data)) +
-                chunk_head +
-                struct.pack("!I", 0xFFFFFFFF & zlib.crc32(chunk_head)))
-
-    png_bytes = b''.join([
-        b'\x89PNG\r\n\x1a\n',
-        png_pack(b'IHDR', struct.pack("!2I5B", width, height, 8, 6, 0, 0, 0)),
-        png_pack(b'IDAT', zlib.compress(raw_data, 9)),
-        png_pack(b'IEND', b'')])
-
-    write_file(filename, png_bytes)
+    ret = cv2.imwrite(filename, image)
+    if not ret:
+        logging.error(f"Writing PNG file {filename} failed")

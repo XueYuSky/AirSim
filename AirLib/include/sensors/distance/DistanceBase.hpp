@@ -16,15 +16,6 @@ public:
         : SensorBase(sensor_name)
     {}
 
-public: //types
-    struct Output { //same fields as ROS message
-        real_T distance;    //meters
-        real_T min_distance;//m
-        real_T max_distance;//m
-        Pose relative_pose;
-    };
-
-
 public:
     virtual void reportState(StateReporter& reporter) override
     {
@@ -34,20 +25,20 @@ public:
         reporter.writeValue("Dist-Curr", output_.distance);
     }
 
-    const Output& getOutput() const
+    const DistanceSensorData& getOutput() const
     {
         return output_;
     }
 
 protected:
-    void setOutput(const Output& output)
+    void setOutput(const DistanceSensorData& output)
     {
         output_ = output;
     }
 
 
 private:
-    Output output_;
+    DistanceSensorData output_;
 };
 
 
